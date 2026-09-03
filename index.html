@@ -157,7 +157,7 @@ input:focus,select:focus{border-color:var(--orange-dark);box-shadow:0 0 0 3px rg
 .alert{margin-top:10px;border:1px solid #EBC2B6;background:#FBEDE9;border-radius:var(--r-sm);padding:10px 13px;font-size:12.5px;color:#8A3524;white-space:pre-wrap;line-height:1.5}
 
 /* ---------- kpi band ---------- */
-.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:26px}
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:26px}
 .kpi{background:var(--panel);border:1px solid var(--line-soft);border-radius:var(--r-md);padding:16px 17px 17px;box-shadow:var(--shadow-soft)}
 .kpi .k{font-size:12px;color:var(--ink-50);font-weight:500}
 .kpi-head{display:flex;align-items:center;gap:9px;margin-bottom:9px}
@@ -170,6 +170,7 @@ input:focus,select:focus{border-color:var(--orange-dark);box-shadow:0 0 0 3px rg
 .vrow{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-top:7px}
 .kpi .v{font-family:"Plus Jakarta Sans",sans-serif;font-size:25px;font-weight:800;line-height:1.1;letter-spacing:-.02em}
 .kpi .v.accent{color:var(--orange-dark)}
+.kpi-subline{font-size:11px;color:var(--ink-50);font-weight:500}
 
 /* ---------- sections ---------- */
 section{margin-bottom:28px;scroll-margin-top:20px}
@@ -601,8 +602,8 @@ tr.total:hover td{background:var(--line-soft)}
     <button type="button" class="jumpnav-item" data-target="sec-forecast">Forecast</button>
     <button type="button" class="jumpnav-item" data-target="sec-heldup" id="jumpHeldUp" hidden>Held Up</button>
     <button type="button" class="jumpnav-item" data-target="sec-nonachievable" id="jumpNonAch" hidden>Non-Achievable</button>
-    <button type="button" class="jumpnav-item" data-target="sec-rails">Projects</button>
     <button type="button" class="jumpnav-item" data-target="sec-status">Project Status</button>
+    <button type="button" class="jumpnav-item" data-target="sec-rails">Projects</button>
   </nav>
 
   <div id="dashboardMain">
@@ -626,7 +627,20 @@ tr.total:hover td{background:var(--line-soft)}
         <span class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 5 5 19"></path><circle cx="7" cy="7" r="2.3"></circle><circle cx="17" cy="17" r="2.3"></circle></svg></span>
         <span class="k">Overall % complete</span>
       </div>
-      <div class="vrow"><span class="v num" id="kPct">—</span></div>
+      <div class="vrow">
+        <span class="v num" id="kPct">—</span>
+        <span class="kpi-subline" id="kPctSub">—</span>
+      </div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-head">
+        <span class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M12 19V5M20 19v-7"></path></svg></span>
+        <span class="k">Achieved of Achievable</span>
+      </div>
+      <div class="vrow">
+        <span class="v num" id="kAchOfAch" style="color:#1E9B76">—</span>
+        <span class="kpi-subline" id="kAchOfAchSub">—</span>
+      </div>
     </div>
     <div class="kpi">
       <div class="kpi-head">
@@ -738,6 +752,14 @@ tr.total:hover td{background:var(--line-soft)}
     </div>
   </section>
 
+  <section id="sec-status">
+    <div class="sec-head"><h2 class="sec-title">Milestone status breakdown</h2></div>
+    <div class="two">
+      <div class="panel"><table id="statusValueTbl"></table></div>
+      <div class="panel"><table id="statusCountTbl"></table></div>
+    </div>
+  </section>
+
   <section id="sec-rails">
     <div class="sec-head">
       <h2 class="sec-title">Project milestone rails</h2>
@@ -757,14 +779,6 @@ tr.total:hover td{background:var(--line-soft)}
         <div><label class="f" for="fStatus">Status</label><select id="fStatus"><option value="">All statuses</option><option>Completed</option><option>In Progress</option><option>Held Up</option><option>Yet to Start</option></select></div>
       </div>
       <div id="rails"></div>
-    </div>
-  </section>
-
-  <section id="sec-status">
-    <div class="sec-head"><h2 class="sec-title">Milestone status breakdown</h2></div>
-    <div class="two">
-      <div class="panel"><table id="statusValueTbl"></table></div>
-      <div class="panel"><table id="statusCountTbl"></table></div>
     </div>
   </section>
 
@@ -1452,6 +1466,22 @@ function buildModel(recs){
   const total = recs.reduce((s,r)=>s+r.value,0);
   const achieved = recs.filter(r=>r.status==="Completed").reduce((s,r)=>s+r.value,0);
   const weighted = recs.reduce((s,r)=>s + r.value*(r.pct||0)/100, 0);
+  // Driven by each milestone's explicit Achievable Yes/No flag, not status —
+  // computed once here so every consumer (the gauge, the KPI comparison
+  // card) reads the same number rather than each recomputing it separately.
+  const nonAchievableValue = recs.filter(r => !r.achievable).reduce((s,r) => s+r.value, 0);
+  const achievableValue = Math.max(total - nonAchievableValue, 0);
+  // Of what's realistically achievable this month, how much has actually
+  // landed so far — NOT achieved as a share of the whole portfolio (that's
+  // the plain `achieved`/`total` figure the KPI band already shows).
+  // Restricted to milestones that are BOTH marked Achievable AND actually
+  // Completed, since a milestone marked Non-Achievable could technically
+  // also be Completed in the sheet (contradictory data, but not something
+  // the sheet itself forbids) — without this filter that edge case could
+  // push the result over 100%, which wouldn't make sense here.
+  const achievedOfAchievableValue = recs
+    .filter(r => r.achievable && r.status === "Completed")
+    .reduce((s,r) => s+r.value, 0);
 
   const byStatus = {};
   STATUSES.forEach(s => byStatus[s] = {count:0, value:0});
@@ -1476,7 +1506,7 @@ function buildModel(recs){
   }));
 
   return {
-    recs, total, achieved, weighted,
+    recs, total, achieved, weighted, achievableValue, nonAchievableValue, achievedOfAchievableValue,
     byStatus, projects
   };
 }
@@ -1492,6 +1522,9 @@ function render(){
   $("kTotal").textContent = short(m.total);
   $("kAch").textContent = short(m.achieved);
   $("kPct").textContent = fmtPct(pct(m.achieved, m.total));
+  $("kPctSub").textContent = short(m.achieved) + " of " + short(m.total) + " target";
+  $("kAchOfAch").textContent = fmtPct(pct(m.achievedOfAchievableValue, m.achievableValue));
+  $("kAchOfAchSub").textContent = short(m.achievedOfAchievableValue) + " of " + short(m.achievableValue) + " achievable";
   $("kProj").textContent = m.projects.length;
   $("kMs").textContent = m.recs.length;
 
@@ -1641,9 +1674,10 @@ function renderAchievableGauge(m){
      genuinely low achievable share (e.g. 68%) painted BOTH arcs in shades
      of red at once — reading as one undifferentiated "everything's bad"
      blob rather than two distinct categories. Two fixed, clearly different
-     hues read correctly regardless of the split. */
-  const nonAchievableValue = m.recs.filter(r => !r.achievable).reduce((s,r) => s+r.value, 0);
-  const achievableValue = Math.max(m.total - nonAchievableValue, 0);
+     hues read correctly regardless of the split.
+     achievableValue/nonAchievableValue come from buildModel() now, shared
+     with the KPI comparison card, rather than recomputed here separately. */
+  const {achievableValue, nonAchievableValue} = m;
   const total = m.total;
   const achievableFrac = total > 0 ? achievableValue/total : 0;
   const pctVal = achievableFrac*100;
@@ -1709,6 +1743,20 @@ function renderAchievableGauge(m){
       if(arcEl) arcEl.classList.remove("hovered");
       hideTip();
     });
+    // Clicking Non-Achievable jumps to and opens the Non-Achievable spotlight
+    // panel below — only wired when there's actually something to show
+    // there, since the section stays entirely hidden otherwise (nothing
+    // currently marked Non-Achievable this month).
+    if(part === "nonachievable" && nonAchievableValue > 0){
+      item.addEventListener("click", () => {
+        const toggle = $("nonAchToggle");
+        if(toggle && toggle.getAttribute("aria-expanded") !== "true"){
+          toggle.setAttribute("aria-expanded", "true");
+          $("nonAchList").hidden = false;
+        }
+        jumpToSection("sec-nonachievable");
+      });
+    }
   });
 }
 
@@ -2622,24 +2670,29 @@ $("rails").addEventListener("click", e => {
   if(btn) navigateToProject(btn.dataset.customer);
 });
 
+/* Shared by the jump-nav pills below and the gauge legend's click-to-jump
+   (Non-Achievable legend -> Non-Achievable spotlight panel): closes the
+   project detail page first if one's open (same direct pushState +
+   showDashboard() path the back button uses, not a location.hash
+   assignment — that triggers the browser's own hash-scroll behaviour,
+   which fights an explicit scrollIntoView call), then scrolls to the
+   target section. */
+function jumpToSection(targetId){
+  const target = document.getElementById(targetId);
+  if(currentProjectCustomer){
+    history.pushState({}, "", location.pathname + location.search);
+    showDashboard();
+  }
+  if(target) target.scrollIntoView({behavior:"smooth", block:"start"});
+}
+
 /* Jump nav: plain buttons (not links) driving scrollIntoView directly, so
    there's no href/native-navigation involved at all — some sandboxed/
    embedded preview contexts were intercepting in-page hash links (href="#...")
    as if they were external navigation and opening a new tab, even with no
-   target="_blank" anywhere. Buttons have no navigation semantics to hijack.
-   Also works from the project detail page: if one's open, it's closed via
-   the same direct history.pushState + showDashboard() path as the back
-   button, before scrolling — not a location.hash assignment, since that's
-   what caused the browser's own hash-scroll behaviour to override this. */
+   target="_blank" anywhere. Buttons have no navigation semantics to hijack. */
 document.querySelectorAll(".jumpnav-item").forEach(btn => {
-  btn.addEventListener("click", () => {
-    const target = document.getElementById(btn.dataset.target);
-    if(currentProjectCustomer){
-      history.pushState({}, "", location.pathname + location.search);
-      showDashboard();
-    }
-    if(target) target.scrollIntoView({behavior:"smooth", block:"start"});
-  });
+  btn.addEventListener("click", () => jumpToSection(btn.dataset.target));
 });
 
 /* Scrollspy: highlight whichever jump-nav pill matches the section currently
